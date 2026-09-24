@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="yo" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Yorùbá AI - Aṣojú Ìròyìn Ọgbọ́n AI</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            ambergold: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              200: '#fde68a',
+              300: '#fcd34d',
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706',
+              700: '#b45309',
+              800: '#92400e',
+              900: '#78350f',
+            },
+            emeraldgreen: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 163, 175, 0.3);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 163, 175, 0.5);
+    }
+    
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.1); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .animate-pulse-ring {
+      animation: pulse-ring 1.5s infinite ease-in-out;
+    }
+
+    textarea::-webkit-scrollbar {
+      width: 4px;
+    }
+  </style>
+
+  <script type="module">
+    import { GoogleGenAI } from "https://esm.sh/@google/genai@0.1.1";
+
+    window.YorubaAIApp = {
+      ai: null,
+      chats: [],
+      currentChatId: null,
+      settings: {
+        theme: 'light',
+        fontSize: 'md',
+        speechRate: 1.0,
+        apiKey: ''
+      },
+      isRecording: false,
+      recognition: null,
+      isSpeaking: false,
+      isGenerating: false,
+
+      init() {
+        this.loadSettings();
+        this.loadChats();
+        this.initSpeechRecognition();
+        this.initGemini();
+        this.applyTheme();
+        this.renderSidebarChats();
+        
+        if (!this.currentChatId || !this.chats.find(c => c.id === this.currentChatId)) {
+          this.createNewChat(false);
+        } else {
+          this.loadActiveChatMessages();
+        }
+
+        this.attachEventListeners();
+        lucide.createIcons();
+      },
+
+      initGemini() {
+        let key = this.settings.apiKey;
+        if (!key && window.process && window.process.env && window.process.env.GEMINI_API_KEY) {
+          key = window.process.env.GEMINI_API_KEY;
+        }
+        if (key) {
+          try {
+            this.ai = new GoogleGenAI({ apiKey: key });
+          } catch(err) {
+            console.error("Aṣìṣe SDK Gemini:", err);
+            this.ai = null;
+          }
+        } else {
+          this.ai = null;
+        }
+        this.updateApiKeyWarningState();
+      },
+
+      updateApiKeyWarningState() {
+        const warningBanner = document.getElementById('api-key-warning');
+        if (warningBanner) {
+          if (!this.getEffectiveApiKey()) {
+            warningBanner.classList.remove('hidden');
+          } else {
+            warningBanner.classList.add('hidden');
+          }
+        }
+      },
+
+      getEffectiveApiKey() {
+        if (this.settings.apiKey) return this.settings.apiKey;
+        if (window.process && window.process.env && window.process.env.GEMINI_API_KEY) {
+          return window.process.env.GEMINI_API_KEY;
+        }
+        return "";
+      },
+
+      loadSettings() {
+        const saved = localStorage.getItem('yoruba_ai_settings_v2');
+        if (saved) {
+          try {
+            this.settings = { ...this.settings, ...JSON.parse(saved) };
+          } catch(e) { 
+            console.error("Aṣìṣe àtúnṣe:", e); 
+          }
+        }
+      },
+
+      saveSettings() {
+        localStorage.setItem('yoruba_ai_settings_v2', JSON.stringify(this.settings));
+        this.applyTheme();
+        this.applyFontSize();
+        this.initGemini();
+      },
+
+      applyTheme() {
+        if (this.settings.theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      },
+
+      applyFontSize() {
+        const chatContainer = document.getElementById('chat-messages');
+        if (!chatContainer) return;
+        chatContainer.classList.remove('text-xs', 'text-sm', 'text-base', 'text-lg');
+        if (this.settings.fontSize === 'sm') chatContainer.classList.add('text-xs', 'md:text-sm');
+        else if (this.settings.fontSize === 'lg') chatContainer.classList.add('text-base', 'md:text-lg');
+        else chatContainer.classList.add('text-sm', 'md:text-base');
+      },
+
+      loadChats() {
+        const saved = localStorage.getItem('yoruba_ai_chats_v2');
+        if (saved) {
+          try {
+            this.chats = JSON.parse(saved);
+          } catch(e) { this.chats = []; }
+        }
+        const activeId = localStorage.getItem('yoruba_ai_active_chat_v2');
+        if (activeId) this.currentChatId = activeId;
+      },
+
+      saveChats() {
+        localStorage.setItem('yoruba_ai_chats_v2', JSON.stringify(this.chats));
+        if (this.currentChatId) {
+          localStorage.setItem('yoruba_ai_active_chat_v2', this.currentChatId);
+        }
+      },
+
+      createNewChat(render = true) {
+        const newChat = {
+          id: 'chat_' + Date.now(),
+          title: 'Òrọ̀ Titun',
+          createdAt: new Date().toISOString(),
+          messages: []
+        };
+        this.chats.unshift(newChat);
+        this.currentChatId = newChat.id;
+        this.saveChats();
+        this.renderSidebarChats();
+        if (render) this.loadActiveChatMessages();
+      },
+
+      selectChat(id) {
+        this.currentChatId = id;
+        this.saveChats();
+        this.renderSidebarChats();
+        this.loadActiveChatMessages();
+        this.closeMobileSidebar();
+      },
+
+      deleteChat(id, e) {
+        if (e) e.stopPropagation();
+        this.chats = this.chats.filter(c => c.id !== id);
+        if (this.currentChatId === id) {
+          this.currentChatId = this.chats.length > 0 ? this.chats[0].id : null;
+        }
+        this.saveChats();
+        this.renderSidebarChats();
+        if (!this.currentChatId) {
+          this.createNewChat(true);
+        } else {
+          this.loadActiveChatMessages();
+        }
+      },
+
+      clearAllHistory() {
+        this.chats = [];
+        this.createNewChat(true);
+      },
+
+      getCurrentChat() {
+        return this.chats.find(c => c.id === this.currentChatId);
+      },
+
+      closeMobileSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (sidebar && overlay) {
+          sidebar.classList.add('-translate-x-full');
+          overlay.classList.add('hidden');
+        }
+      },
+
+      initSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          this.recognition = new SpeechRecognition();
+          this.recognition.continuous = false;
+          this.recognition.interimResults = true;
+          this.recognition.lang = 'yo-NG';
+
+          this.recognition.onstart = () => {
+            this.isRecording = true;
+            this.updateMicUI(true);
+          };
+
+          this.recognition.onresult = (event) => {
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              transcript += event.results[i][0].transcript;
+            }
+            const inputEl = document.getElementById('user-input');
+            if (inputEl) {
+              inputEl.value = transcript;
+              this.autoResizeTextarea(inputEl);
+            }
+          };
+
+          this.recognition.onerror = (event) => {
+            console.error('Aṣìṣe àkọsílẹ̀ ohùn:', event.error);
+            this.stopRecording();
+            this.showToast('Aṣìṣe nígbà tí a ń gbọ́ ohùn rẹ.');
+          };
+
+          this.recognition.onend = () => {
+            this.stopRecording();
+          };
+        }
+      },
+
+      toggleRecording() {
+        if (!this.recognition) {
+          this.showToast('Aṣàyẹ̀wò intanẹẹti rẹ kò gbà á láàyè láti lo gbohúngbohún.');
+          return;
+        }
+        if (this.isRecording) {
+          this.recognition.stop();
+        } else {
+          try {
+            this.recognition.start();
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      },
+
+      stopRecording() {
+        this.isRecording = false;
+        this.updateMicUI(false);
+      },
+
+      updateMicUI(recording) {
+        const micBtn = document.getElementById('mic-btn');
+        const recordingIndicator = document.getElementById('recording-indicator');
+        if (!micBtn) return;
+        
+        if (recording) {
+          micBtn.classList.add('bg-red-500', 'text-white', 'animate-pulse');
+          micBtn.classList.remove('bg-gray-100', 'dark:bg-gray-800', 'text-gray-600', 'dark:text-gray-300');
+          if (recordingIndicator) recordingIndicator.classList.remove('hidden');
+        } else {
+          micBtn.classList.remove('bg-red-500', 'text-white', 'animate-pulse');
+          micBtn.classList.add('bg-gray-100', 'dark:bg-gray-800', 'text-gray-600', 'dark:text-gray-300');
+          if (recordingIndicator) recordingIndicator.classList.add('hidden');
+        }
+      },
+
+      speakText(text, buttonElement) {
+        if (!('speechSynthesis' in window)) {
+          this.showToast('Kọ̀mpútà rẹ kò gbà á láàyè láti kà ọ̀rọ̀ síta.');
+          return;
+        }
+
+        if (this.isSpeaking) {
+          window.speechSynthesis.cancel();
+          this.isSpeaking = false;
+          this.resetSpeakerButtons();
+          return;
+        }
+
+        const cleanText = text.replace(/[*_#`~]/g, '');
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = parseFloat(this.settings.speechRate) || 1.0;
+        
+        const voices = window.speechSynthesis.getVoices();
+        const yoVoice = voices.find(v => v.lang.includes('yo') || v.lang.includes('YO')) || voices[0];
+        if (yoVoice) utterance.voice = yoVoice;
+        utterance.lang = 'yo-NG';
+
+        utterance.onstart = () => {
+          this.isSpeaking = true;
+          if (buttonElement) {
+            buttonElement.classList.add('text-ambergold-500', 'animate-bounce');
+          }
+        };
+
+        utterance.onend = utterance.onerror = () => {
+          this.isSpeaking = false;
+          this.resetSpeakerButtons();
+        };
+
+        window.speechSynthesis.speak(utterance);
+      },
+
+      resetSpeakerButtons() {
+        document.querySelectorAll('.speaker-btn').forEach(btn => {
+          btn.classList.remove('text-ambergold-500', 'animate-bounce');
+        });
+      },
+
+      async sendMessage(promptText = null) {
+        if (this.isGenerating) return;
+
+        const inputEl = document.getElementById('user-input');
+        const text = promptText || (inputEl ? inputEl.value.trim() : '');
+        if (!text) return;
+
+        const apiKey = this.getEffectiveApiKey();
+        if (!apiKey) {
+          this.openSettingsModal();
+          this.showToast('Jọ̀ọ́ fi Àmì Ìṣípayá (API Key) rẹ síbẹ̀ láti tẹ̀síwájú.');
+          return;
+        }
+
+        if (inputEl && !promptText) {
+          inputEl.value = '';
+          this.autoResizeTextarea(inputEl);
+        }
+
+        const currentChat = this.getCurrentChat();
+        if (!currentChat) return;
+
+        const userMsg = {
+          id: 'msg_' + Date.now(),
+          sender: 'user',
+          text: text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        currentChat.messages.push(userMsg);
+
+        if (currentChat.messages.length === 1) {
+          currentChat.title = text.length > 28 ? text.substring(0, 28) + '...' : text;
+          this.renderSidebarChats();
+        }
+
+        this.saveChats();
+        this.renderMessages();
+
+        const aiMsgId = 'msg_' + (Date.now() + 1);
+        const aiMsg = {
+          id: aiMsgId,
+          sender: 'ai',
+          text: '',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        currentChat.messages.push(aiMsg);
+
+        this.isGenerating = true;
+        this.showTypingIndicator(true);
+
+        try {
+          if (!this.ai) {
+            this.ai = new GoogleGenAI({ apiKey: apiKey });
+          }
+
+          const systemInstruction = `Ìwọ ni "Yorùbá AI", aṣojú ìmọ̀ ẹ̀rọ tí ó ń dá ìbéèrè lóhùn pẹ̀lú ọgbọ́n àti ìfẹ́ ní èdè Yorùbá nìkan.
+
+ÀWỌN ÒFIN PÀTÀKÌ JỌ́JỌ́:
+1. SỌ TÀBÍ KỌ̀WÉ NÍ ÈDÈ YORÙBÁ NÌKAN NI GBOGBO ÌGBÀ. Má ṣe lo ọ̀rọ̀ Gẹ̀ẹ́sì tàbí èdè míràn rárá.
+2. Ti oníṣe bá kọ̀wé tàbí sọ̀rọ̀ ní èdè Gẹ̀ẹ́sì tàbí èdè míràn, dá wọn lóbùn pẹ̀lú ọ̀wọ̀ ní èdè Yorùbá pé: "Ẹ̀jọ̀ọ́, ẹ jẹ́ k'á sọ̀rọ̀ ní èdè Yorùbá. Bawo ni mo ṣe le ràn ọ́ lọ́wọ́ lónìí?"
+3. Lo Yorùbá tí ó gbé pẹ́kí, pẹ̀lú àwọn àmì ohùn (àwọn àmì òkè, àmì ìsàlẹ̀: á, à, ẹ, ọ, ṣ) tí ó tọ́ pátápátá.
+4. Nígbà gbogbo, jẹ́ ẹni tí ó ní ọ̀wọ̀, ìmọ̀ ìjìnlẹ̀, àti ìfẹ́ láti ràn wọ́n lọ́wọ́ pẹ̀lú ìtàn, alàyé, ìtumọ̀, àti kíkọ́ èdè Yorùbá.`;
+
+          const contentsHistory = currentChat.messages.slice(0, -1).map(m => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: m.text }]
+          }));
+
+          const responseStream = await this.ai.models.generateContentStream({
+            model: 'gemini-2.5-flash',
+            contents: contentsHistory,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: 0.7,
+            }
+          });
+
+          this.showTypingIndicator(false);
+
+          let accumulatedText = "";
+          for await (const chunk of responseStream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              accumulatedText += chunkText;
+              aiMsg.text = accumulatedText;
+              this.updateStreamingMessageUI(aiMsgId, accumulatedText);
+            }
+          }
+
+          if (!accumulatedText) {
+            aiMsg.text = "Ẹ̀jọ̀ọ́, kò sí ìdáhùn tí ó wá láti ọ̀dọ̀ AI. Ẹ gbìyànjú lẹ́ẹ̀kan sí i.";
+          }
+
+          this.saveChats();
+
+        } catch (error) {
+          console.error('Aṣìṣe Gemini API:', error);
+          this.showTypingIndicator(false);
+          aiMsg.text = "Ẹ̀jọ̀ọ́, aṣìṣe kan wáyé nígbà tí a ń fi ránṣẹ́ sí ẹ̀rọ AI. Yẹ̀ Àmì Ìṣípayá (API Key) rẹ tàbí ìsopọ̀ intanẹẹti rẹ wò.";
+          this.saveChats();
+        } finally {
+          this.isGenerating = false;
+          this.renderMessages();
+        }
+      },
+
+      updateStreamingMessageUI(msgId, currentText) {
+        const msgBubble = document.getElementById(`msg-text-${msgId}`);
+        if (msgBubble) {
+          msgBubble.innerHTML = this.formatMarkdown(currentText);
+          const container = document.getElementById('chat-messages');
+          if (container) container.scrollTop = container.scrollHeight;
+        } else {
+          this.renderMessages();
+        }
+      },
+
+      renderSidebarChats() {
+        const container = document.getElementById('chat-history-list');
+        if (!container) return;
+
+        if (this.chats.length === 0) {
+          container.innerHTML = `
+            <div class="px-4 py-8 text-center text-gray-400 text-xs">
+              Kò sí àkọsílẹ̀ ọ̀rọ̀ kankan níbí.
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = this.chats.map(chat => {
+          const isActive = chat.id === this.currentChatId;
+          return `
+            <div onclick="window.YorubaAIApp.selectChat('${chat.id}')" 
+                 class="group relative flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
+                   isActive 
+                     ? 'bg-ambergold-500 text-gray-950 font-semibold shadow-sm' 
+                     : 'hover:bg-gray-200 dark:hover:bg-gray-800/80 text-gray-700 dark:text-gray-300'
+                 }">
+              <div class="flex items-center space-x-2.5 overflow-hidden">
+                <i data-lucide="message-square" class="w-4 h-4 shrink-0"></i>
+                <span class="truncate text-xs md:text-sm">${this.escapeHtml(chat.title)}</span>
+              </div>
+              <button onclick="window.YorubaAIApp.deleteChat('${chat.id}', event)" 
+                      title="Paresẹ́" 
+                      class="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-opacity">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        lucide.createIcons();
+      },
+
+      loadActiveChatMessages() {
+        this.renderMessages();
+        this.applyFontSize();
+      },
+
+      renderMessages() {
+        const container = document.getElementById('chat-messages');
+        const emptyState = document.getElementById('empty-state');
+        if (!container) return;
+
+        const currentChat = this.getCurrentChat();
+        if (!currentChat || currentChat.messages.length === 0) {
+          container.innerHTML = '';
+          if (emptyState) emptyState.classList.remove('hidden');
+          return;
+        }
+
+        if (emptyState) emptyState.classList.add('hidden');
+
+        container.innerHTML = currentChat.messages.map(msg => {
+          const isUser = msg.sender === 'user';
+          return `
+            <div class="flex flex-col ${isUser ? 'items-end' : 'items-start'} mb-5 group">
+              <div class="flex items-start space-x-2.5 max-w-[90%] md:max-w-[80%] ${isUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'}">
+                <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                  isUser 
+                    ? 'bg-ambergold-600 text-white shadow-sm' 
+                    : 'bg-emeraldgreen-700 text-white shadow-sm ring-2 ring-emeraldgreen-500/20'
+                }">
+                  ${isUser ? 'ÌWỌ' : 'AI'}
+                </div>
+                <div class="relative rounded-2xl px-4 py-3 shadow-sm ${
+                  isUser 
+                    ? 'bg-ambergold-500 text-gray-950 rounded-tr-none font-medium' 
+                    : 'bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 border border-gray-200/80 dark:border-gray-800 rounded-tl-none'
+                }">
+                  <div id="msg-text-${msg.id}" class="prose dark:prose-invert max-w-none leading-relaxed whitespace-pre-wrap">${this.formatMarkdown(msg.text)}</div>
+                  
+                  <div class="flex items-center justify-between mt-2 pt-1.5 border-t ${isUser ? 'border-black/10' : 'border-gray-100 dark:border-gray-800'} text-[10px] opacity-75">
+                    <span>${msg.timestamp}</span>
+                    <div class="flex items-center space-x-1.5 ml-4">
+                      <button onclick="window.YorubaAIApp.copyToClipboard('${this.escapeQuotes(msg.text)}')" 
+                              title="Ṣàdàkọ" 
+                              class="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors">
+                        <i data-lucide="copy" class="w-3 h-3"></i>
+                      </button>
+                      ${!isUser ? `
+                        <button onclick="window.YorubaAIApp.speakText('${this.escapeQuotes(msg.text)}', this)" 
+                                title="Kà á síta" 
+                                class="speaker-btn p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors">
+                          <i data-lucide="volume-2" class="w-3 h-3"></i>
+                        </button>
+                      ` : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        lucide.createIcons();
+        container.scrollTop = container.scrollHeight;
+      },
+
+      showTypingIndicator(show) {
+        let indicator = document.getElementById('typing-indicator');
+        const container = document.getElementById('chat-messages');
+        
+        if (show) {
+          if (!indicator && container) {
+            indicator = document.createElement('div');
+            indicator.id = 'typing-indicator';
+            indicator.className = 'flex items-center space-x-2.5 mb-5';
+            indicator.innerHTML = `
+              <div class="w-8 h-8 rounded-xl bg-emeraldgreen-700 text-white font-bold flex items-center justify-center text-xs">AI</div>
+              <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm flex items-center space-x-1.5">
+                <span class="w-2 h-2 bg-ambergold-500 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                <span class="w-2 h-2 bg-ambergold-500 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                <span class="w-2 h-2 bg-ambergold-500 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                <span class="text-xs text-gray-400 font-medium ml-2">Yorùbá AI ń ronú...</span>
+              </div>
+            `;
+            container.appendChild(indicator);
+            container.scrollTop = container.scrollHeight;
+          }
+        } else {
+          if (indicator) indicator.remove();
+        }
+      },
+
+      formatMarkdown(text) {
+        if (!text) return '';
+        let escaped = this.escapeHtml(text);
+        escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        escaped = escaped.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        escaped = escaped.replace(/`(.*?)`/g, '<code class="bg-black/5 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-xs">$1</code>');
+        return escaped;
+      },
+
+      escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+      },
+
+      escapeQuotes(str) {
+        return str.replace(/'/g, "\\'").replace(/\n/g, " ");
+      },
+
+      copyToClipboard(text) {
+        const tempInput = document.createElement('textarea');
+        tempInput.value = text;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        this.showToast('A ti ṣàdàkọ ọ̀rọ̀ náà!');
+      },
+
+      showToast(msg) {
+        let toast = document.getElementById('app-toast');
+        if (!toast) {
+          toast = document.createElement('div');
+          toast.id = 'app-toast';
+          toast.className = 'fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2.5 rounded-full shadow-xl z-50 transition-opacity duration-300 opacity-0 pointer-events-none font-medium border border-gray-700';
+          document.body.appendChild(toast);
+        }
+        toast.innerText = msg;
+        toast.classList.remove('opacity-0');
+        setTimeout(() => toast.classList.add('opacity-0'), 2500);
+      },
+
+      autoResizeTextarea(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+      },
+
+      openSettingsModal() {
+        this.syncSettingsUI();
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal) settingsModal.classList.remove('hidden');
+      },
+
+      closeSettingsModal() {
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal) settingsModal.classList.add('hidden');
+      },
+
+      attachEventListeners() {
+        const sendBtn = document.getElementById('send-btn');
+        if (sendBtn) sendBtn.addEventListener('click', () => this.sendMessage());
+
+        const userPrompt = document.getElementById('user-input');
+        if (userPrompt) {
+          userPrompt.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              this.sendMessage();
+            }
+          });
+          userPrompt.addEventListener('input', () => this.autoResizeTextarea(userPrompt));
+        }
+
+        const micBtn = document.getElementById('mic-btn');
+        if (micBtn) micBtn.addEventListener('click', () => this.toggleRecording());
+
+        document.querySelectorAll('.btn-new-chat').forEach(btn => {
+          btn.addEventListener('click', () => this.createNewChat(true));
+        });
+
+        const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+        if (toggleSidebarBtn && sidebar && sidebarOverlay) {
+          toggleSidebarBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('-translate-x-full');
+            sidebarOverlay.classList.toggle('hidden');
+          });
+          sidebarOverlay.addEventListener('click', () => {
+            this.closeMobileSidebar();
+          });
+        }
+
+        const settingsBtn = document.getElementById('settings-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+
+        if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettingsModal());
+        if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => this.closeSettingsModal());
+
+        const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+        const apiKeyInput = document.getElementById('setting-api-key');
+        if (saveApiKeyBtn && apiKeyInput) {
+          saveApiKeyBtn.addEventListener('click', () => {
+            this.settings.apiKey = apiKeyInput.value.trim();
+            this.saveSettings();
+            this.closeSettingsModal();
+            this.showToast('A ti tọ́jú Àmì Ìṣípayá (API Key) rẹ!');
+          });
+        }
+
+        const themeToggleBtn = document.getElementById('theme-toggle-btn');
+        if (themeToggleBtn) {
+          themeToggleBtn.addEventListener('click', () => {
+            this.settings.theme = this.settings.theme === 'dark' ? 'light' : 'dark';
+            this.saveSettings();
+          });
+        }
+
+        const clearHistoryBtn = document.getElementById('clear-history-btn');
+        if (clearHistoryBtn) {
+          clearHistoryBtn.addEventListener('click', () => {
+            if (confirm('Ṣé o dáníjú pé o fẹ́ paresẹ́ gbogbo àkọsílẹ̀ ọ̀rọ̀ rẹ?')) {
+              this.clearAllHistory();
+              this.closeSettingsModal();
+              this.showToast('A ti paresẹ́ gbogbo àkọsílẹ̀ ọ̀rọ̀!');
+            }
+          });
+        }
+
+        const speechRateInput = document.getElementById('setting-speech-rate');
+        const speechRateVal = document.getElementById('speech-rate-val');
+        if (speechRateInput && speechRateVal) {
+          speechRateInput.addEventListener('input', (e) => {
+            this.settings.speechRate = parseFloat(e.target.value);
+            speechRateVal.innerText = e.target.value + 'x';
+            this.saveSettings();
+          });
+        }
+
+        const fontSizeSelect = document.getElementById('setting-font-size');
+        if (fontSizeSelect) {
+          fontSizeSelect.addEventListener('change', (e) => {
+            this.settings.fontSize = e.target.value;
+            this.saveSettings();
+          });
+        }
+      },
+
+      syncSettingsUI() {
+        const speechRateInput = document.getElementById('setting-speech-rate');
+        const speechRateVal = document.getElementById('speech-rate-val');
+        const fontSizeSelect = document.getElementById('setting-font-size');
+        const apiKeyInput = document.getElementById('setting-api-key');
+
+        if (speechRateInput) speechRateInput.value = this.settings.speechRate || 1.0;
+        if (speechRateVal) speechRateVal.innerText = (this.settings.speechRate || 1.0) + 'x';
+        if (fontSizeSelect) fontSizeSelect.value = this.settings.fontSize || 'md';
+        if (apiKeyInput) apiKeyInput.value = this.settings.apiKey || '';
+      }
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      window.YorubaAIApp.init();
+    });
+  </script>
+</head>
+
+<body class="h-full bg-ambergold-50/30 dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased flex flex-col font-sans transition-colors duration-200 selection:bg-ambergold-500 selection:text-gray-950">
+
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden backdrop-blur-sm"></div>
+
+  <div class="flex h-full w-full overflow-hidden">
+    
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col transition-transform duration-300 -translate-x-full md:translate-x-0 shadow-lg md:shadow-none">
+      
+      <!-- App Header / Title -->
+      <div class="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-emeraldgreen-900 text-white">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-ambergold-500 flex items-center justify-center text-gray-950 shadow-md font-extrabold text-sm">
+            <i data-lucide="sparkles" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h1 class="font-bold text-lg leading-none tracking-tight text-white">Yorùbá AI</h1>
+            <p class="text-[10px] text-emeraldgreen-200 mt-0.5 font-medium">Aṣojú Ìròyìn Ọgbọ́n AI</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- New Chat Button ("Òrọ̀ Titun") -->
+      <div class="p-3">
+        <button class="btn-new-chat w-full flex items-center justify-center space-x-2 bg-ambergold-500 hover:bg-ambergold-600 active:scale-[0.98] text-gray-950 font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all text-sm">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Òrọ̀ Titun</span>
+        </button>
+      </div>
+
+      <!-- Chat History Header -->
+      <div class="px-4 py-2 flex items-center justify-between text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+        <span>Àwọn Ìròyìn Sẹ́yìn</span>
+        <i data-lucide="history" class="w-3.5 h-3.5"></i>
+      </div>
+
+      <!-- Chat History Scroll Area -->
+      <div id="chat-history-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+        <!-- History items rendered here -->
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div class="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 text-[11px] text-gray-500 dark:text-gray-400 text-center font-medium">
+        <span>Èdè Yorùbá Nìkan Níbí</span>
+      </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full min-w-0 bg-ambergold-50/20 dark:bg-gray-950">
+      
+      <!-- Top Header Navigation -->
+      <header class="h-16 border-b border-gray-200/80 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md px-4 flex items-center justify-between shrink-0 z-10">
+        <div class="flex items-center space-x-3">
+          <button id="toggle-sidebar" class="md:hidden p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300">
+            <i data-lucide="menu" class="w-5 h-5"></i>
+          </button>
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emeraldgreen-500 animate-pulse"></span>
+            <span class="font-bold text-sm md:text-base text-gray-800 dark:text-gray-100">Yorùbá AI Wà Lórí Ìkannì</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <!-- Theme Switcher -->
+          <button id="theme-toggle-btn" title="Àyípadà Àwọ̀" class="p-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
+            <i data-lucide="sun" class="w-4 h-4 hidden dark:block"></i>
+            <i data-lucide="moon" class="w-4 h-4 block dark:hidden"></i>
+          </button>
+
+          <!-- Settings Button -->
+          <button id="settings-btn" title="Ètò" class="p-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
+            <i data-lucide="settings" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto p-4 md:p-6 relative" id="chat-workspace">
+        
+        <!-- API Key Warning Banner if missing -->
+        <div id="api-key-warning" class="hidden mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between text-xs text-amber-700 dark:text-amber-300 max-w-2xl mx-auto">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="key" class="w-4 h-4 text-amber-500 shrink-0"></i>
+            <span>Jọ̀ọ́ fi Àmì Ìṣípayá (API Key) rẹ síbẹ̀ nínú Ètò láti dá ìbéèrè rẹ lóbùn.</span>
+          </div>
+          <button onclick="window.YorubaAIApp.openSettingsModal()" class="font-bold underline ml-2 shrink-0">Fi Síbẹ̀</button>
+        </div>
+
+        <!-- Welcome Screen Prompts -->
+        <div id="empty-state" class="max-w-2xl mx-auto py-8 md:py-12 flex flex-col items-center justify-center text-center space-y-6">
+          <div class="w-16 h-16 rounded-2xl bg-emeraldgreen-800 text-ambergold-400 flex items-center justify-center shadow-xl ring-4 ring-emeraldgreen-900/10">
+            <i data-lucide="bot" class="w-8 h-8"></i>
+          </div>
+          <div>
+            <h2 class="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight">Ẹ kú àbọ̀ sí Yorùbá AI</h2>
+            <p class="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-md">
+              Bẹ̀rẹ̀ ìbanisọ̀rọ̀ tàbí béèrè ìbéèrè èyíkéyìí ní èdè Yorùbá. Mo lè dá ìbéèrè rẹ lóbùn, kọ ìtàn, tàbí kọ́ ọ ní èdè Yorùbá!
+            </p>
+          </div>
+
+          <!-- Quick Suggestion Cards in Pure Yoruba -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full mt-4">
+            <button onclick="window.YorubaAIApp.sendMessage('Kọ ìtàn aládùn kan fún mi')" 
+                    class="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-ambergold-500 dark:hover:border-ambergold-500 text-left transition-all shadow-sm hover:shadow-md group">
+              <i data-lucide="book-open" class="w-5 h-5 text-ambergold-500 mb-2 group-hover:scale-110 transition-transform"></i>
+              <h3 class="font-bold text-xs md:text-sm text-gray-800 dark:text-gray-200">Àwọn Ìtàn</h3>
+              <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Kọ ìtàn aládùn kan fún mi ní èdè Yorùbá.</p>
+            </button>
+
+            <button onclick="window.YorubaAIApp.sendMessage('Ṣàlàyé àwọn òwe Yorùbá pẹ̀lú ìtumọ̀ wọn')" 
+                    class="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-ambergold-500 dark:hover:border-ambergold-500 text-left transition-all shadow-sm hover:shadow-md group">
+              <i data-lucide="landmark" class="w-5 h-5 text-emeraldgreen-500 mb-2 group-hover:scale-110 transition-transform"></i>
+              <h3 class="font-bold text-xs md:text-sm text-gray-800 dark:text-gray-200">Òwe Yorùbá</h3>
+              <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Ṣàlàyé àwọn òwe àti ìmọ̀ ìjìnlẹ̀.</p>
+            </button>
+
+            <button onclick="window.YorubaAIApp.sendMessage('Báwo ni a ṣe ń bẹ̀rẹ̀ èdè Yorùbá kíkọ́?')" 
+                    class="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-ambergold-500 dark:hover:border-ambergold-500 text-left transition-all shadow-sm hover:shadow-md group">
+              <i data-lucide="graduation-cap" class="w-5 h-5 text-purple-500 mb-2 group-hover:scale-110 transition-transform"></i>
+              <h3 class="font-bold text-xs md:text-sm text-gray-800 dark:text-gray-200">Èdè Kíkọ́</h3>
+              <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Báwo ni a ṣe ń bẹ̀rẹ̀ èdè Yorùbá kíkọ́?</p>
+            </button>
+          </div>
+        </div>
+
+        <!-- Dynamic Message List -->
+        <div id="chat-messages" class="max-w-3xl mx-auto space-y-4">
+          <!-- Messages populated dynamically -->
+        </div>
+      </div>
+
+      <div class="p-3 md:p-4 border-t border-gray-200/80 dark:border-gray-800 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shrink-0">
+        <div class="max-w-3xl mx-auto">
+          
+          <!-- Recording Banner -->
+          <div id="recording-indicator" class="hidden mb-2 p-2 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between">
+            <div class="flex items-center space-x-2 text-red-500 text-xs font-semibold px-2">
+              <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+              <span>A ń gbọ́ ohùn rẹ ní èdè Yorùbá...</span>
+            </div>
+            <button onclick="window.YorubaAIApp.toggleRecording()" class="text-[11px] bg-red-500 text-white px-2.5 py-1 rounded-lg font-bold">
+              Dúró
+            </button>
+          </div>
+
+          <div class="relative flex items-end bg-gray-100 dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700/60 focus-within:ring-2 focus-within:ring-ambergold-500/50 focus-within:border-ambergold-500 transition-all p-1.5">
+            
+            <!-- Voice Input Button -->
+            <button id="mic-btn" title="Ìṣàkóso Ohùn" class="p-2.5 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors shrink-0 mb-0.5">
+              <i data-lucide="mic" class="w-5 h-5"></i>
+            </button>
+
+            <!-- Multiline Input Box -->
+            <textarea id="user-input" 
+                      rows="1"
+                      placeholder="Kọ ọ̀rọ̀ tàbí ìbéèrè rẹ síbí ní èdè Yorùbá..." 
+                      class="w-full bg-transparent px-3 py-2 text-sm md:text-base text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none resize-none max-h-32"></textarea>
+
+            <!-- Send Button -->
+            <button id="send-btn" title="Fi Ránṣẹ́" class="p-2.5 rounded-xl bg-ambergold-500 hover:bg-ambergold-600 active:scale-95 text-gray-950 shadow-md transition-all shrink-0 font-bold mb-0.5">
+              <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="mt-2 text-center text-[10px] text-gray-400">
+            <span>Yorùbá AI máa ń dáhùn ìbéèrè ní èdè Yorùbá nìkan.</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="settings-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      
+      <!-- Modal Header -->
+      <div class="p-5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="sliders" class="w-5 h-5 text-ambergold-500"></i>
+          <h3 class="font-bold text-base text-gray-800 dark:text-gray-100">Àwọn Ètò (Settings)</h3>
+        </div>
+        <button id="close-settings-btn" class="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Content -->
+      <div class="p-5 space-y-5 text-xs md:text-sm">
+        
+        <!-- API Key Input -->
+        <div>
+          <label class="block font-semibold text-gray-700 dark:text-gray-300 mb-1">Àmì Ìṣípayá Gemini (API Key)</label>
+          <div class="flex space-x-2">
+            <input type="password" id="setting-api-key" placeholder="Fi Gemini API Key rẹ síbí..." class="flex-1 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-ambergold-500 text-xs" />
+            <button id="save-api-key-btn" class="bg-emeraldgreen-700 hover:bg-emeraldgreen-800 text-white px-3 py-2 rounded-xl font-bold text-xs shrink-0">
+              Tọ́jú
+            </button>
+          </div>
+          <p class="text-[10px] text-gray-400 mt-1">
+            Àmì Ìṣípayá yìí máa wà ní tọ́jú pẹ̀lú ààbò nínú kọ̀mpútà rẹ nìkan.
+          </p>
+        </div>
+
+        <!-- Speech Rate / Speed -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="font-semibold text-gray-700 dark:text-gray-300">Ìpára Ohùn (Speech Speed)</label>
+            <span id="speech-rate-val" class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-ambergold-600 dark:text-ambergold-400 font-bold">1.0x</span>
+          </div>
+          <input type="range" id="setting-speech-rate" min="0.5" max="1.8" step="0.1" value="1.0" class="w-full accent-ambergold-500 cursor-pointer" />
+        </div>
+
+        <!-- Text Size -->
+        <div>
+          <label class="block font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Tóbi Ẹ̀kọ́ / Ìsọfúnni (Text Size)</label>
+          <select id="setting-font-size" class="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-ambergold-500">
+            <option value="sm">Kékeré</option>
+            <option value="md" selected>Dọ́gba</option>
+            <option value="lg">Nlá</option>
+          </select>
+        </div>
+
+        <!-- Clear Chat History -->
+        <div class="pt-3 border-t border-gray-200 dark:border-gray-800">
+          <button id="clear-history-btn" class="w-full flex items-center justify-center space-x-2 p-2.5 rounded-xl border border-red-500/30 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 font-bold transition-colors">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+            <span>Paresẹ́ Àkọsílẹ̀ Gbogbo</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-800 text-center">
+        <p class="text-[11px] text-gray-400 font-medium">Yorùbá AI v2.0 • Èdè Yorùbá Lálááfíà</p>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
